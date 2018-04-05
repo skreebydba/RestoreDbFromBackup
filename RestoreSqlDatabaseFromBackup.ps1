@@ -74,12 +74,15 @@
     HelpMessage='What path will the log file be restored to ?')]
     [Alias('log')]
     [ValidateLength(3,255)]
-    [string]$logpath,		
-    
-    [string]$logname = 'errors.txt'
+    [string]$logpath
   )
 
   process {
+
+  try
+  {
+
+    cls;
 
     Write-Host "Executing this function will kill all connections to database $sourcedb on instance $instance.  Enter " -NoNewline
     Write-Host "Y " -ForegroundColor Red -NoNewline
@@ -88,7 +91,7 @@
 
     if($continue -ne 'Y')
     {
-        Write-Host "Function Restore-SqlDatabaseToAzure was stopped because of request from user." -ForegroundColor Magenta;
+        throw "Function Restore-SqlDatabaseToAzure was stopped because of request from user.";
         return;
     }
 
@@ -108,6 +111,25 @@
         Write-Host "to continue: " -NoNewline
         $overwrite = Read-Host;
 
+        $backupexists = Test-Path $backupfile -ErrorAction SilentlyContinue;
+
+        if($backupexists -ne $True)
+        {
+            throw "Backup file $backupfile does not exist.  Please check the file path and name and retry.";
+        }
+
+        $dataexists = Test-Path $datapath -ErrorAction SilentlyContinue;
+        if($dataexists -ne $True)
+        {
+            throw "Data file path $datapath does not exist.  Please check the file path and retry.";
+        }
+
+        $logexists = Test-Path $logpath -ErrorAction SilentlyContinue;
+        if($logexists -ne $True)
+        {
+            throw "Log file path $logpath does not exist.  Please check the file path and retry.";
+        }
+            
         if($overwrite -eq 'Y')
         {
             Restore-SqlDatabase -ServerInstance $instance -Database $restoredb -BackupFile $backupfile -RelocateFile @($RelocateData,$RelocateLog) -ReplaceDatabase;
@@ -118,4 +140,9 @@
             return;
         }
     }
+catch
+{
+    Write-Error $_;
+}
+}
 }
