@@ -84,6 +84,7 @@
 
     cls;
 
+    <# Prompt user that all connections will be killed in the source database. Stop function if answer is not Y. #>
     Write-Host "Executing this function will kill all connections to database $sourcedb on instance $instance.  Enter " -NoNewline
     Write-Host "Y " -ForegroundColor Red -NoNewline
     Write-Host "to continue: " -NoNewline
@@ -91,26 +92,33 @@
 
     if($continue -ne 'Y')
     {
-        throw "Function Restore-SqlDatabaseToAzure was stopped because of request from user.";
+        Write-Host "Function Restore-SqlDatabaseToAzure was stopped because of request from user.";
         return;
     }
 
+    <# Build the physical file paths and names for the restore database #>
     $physdata = "$datapath\$restoredb.mdf";
     $physlog = "$logpath\$restoredb`_log.ldf"
+
+    <# Build the move parameters for the restored database #>
     $RelocateData = New-Object Microsoft.SqlServer.Management.Smo.RelocateFile("$sourcedb", $physdata)
     $RelocateLog = New-Object Microsoft.SqlServer.Management.Smo.RelocateFile("$sourcedb`_Log", $physlog)
 
+    <# Check if the restore database exists.  If it does, kill all existing connections. #>
     $exists = Invoke-Sqlcmd -ServerInstance $instance -Database master -Query "SELECT 1 FROM sys.databases WHERE name = '$restoredb';";
     if($exists)
     {
         Invoke-Sqlcmd -ServerInstance $instance -Database master -Query "EXEC KillAllSpids @databasename = N'$restoredb';";
     }
 
+        <# Prompt the user that the restore database will be overwritten.  Stop function if the answer is not yes. #>
+
         Write-Host "If database $sourcedb exists on instance $instance, it will be overwitten.  Enter " -NoNewline
         Write-Host "Y " -ForegroundColor Red -NoNewline
         Write-Host "to continue: " -NoNewline
         $overwrite = Read-Host;
 
+        <# Confirm that the backup file, data path, and log path exist.  If any of them do not, raise an error. #>
         $backupexists = Test-Path $backupfile -ErrorAction SilentlyContinue;
 
         if($backupexists -ne $True)
@@ -129,7 +137,8 @@
         {
             throw "Log file path $logpath does not exist.  Please check the file path and retry.";
         }
-            
+
+        <# If all checks have passed and the user has opted to overwrite the restore database, restore the database. #>
         if($overwrite -eq 'Y')
         {
             Restore-SqlDatabase -ServerInstance $instance -Database $restoredb -BackupFile $backupfile -RelocateFile @($RelocateData,$RelocateLog) -ReplaceDatabase;
