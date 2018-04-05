@@ -81,6 +81,17 @@
 
   process {
 
+    Write-Host "Executing this function will kill all connections to database $sourcedb on instance $instance.  Enter " -NoNewline
+    Write-Host "Y " -ForegroundColor Red -NoNewline
+    Write-Host "to continue: " -NoNewline
+    $continue = Read-Host;
+
+    if($continue -ne 'Y')
+    {
+        Write-Host "Function Restore-SqlDatabaseToAzure was stopped because of request from user." -ForegroundColor Magenta;
+        return;
+    }
+
     $physdata = "$datapath\$restoredb.mdf";
     $physlog = "$logpath\$restoredb`_log.ldf"
     $RelocateData = New-Object Microsoft.SqlServer.Management.Smo.RelocateFile("$sourcedb", $physdata)
