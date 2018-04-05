@@ -103,6 +103,19 @@
         Invoke-Sqlcmd -ServerInstance $instance -Database master -Query "EXEC KillAllSpids @databasename = N'$restoredb';";
     }
 
-    Restore-SqlDatabase -ServerInstance $instance -Database $restoredb -BackupFile $backupfile -RelocateFile @($RelocateData,$RelocateLog) -ReplaceDatabase;
-      }
+        Write-Host "If database $sourcedb exists on instance $instance, it will be overwitten.  Enter " -NoNewline
+        Write-Host "Y " -ForegroundColor Red -NoNewline
+        Write-Host "to continue: " -NoNewline
+        $overwrite = Read-Host;
+
+        if($overwrite -eq 'Y')
+        {
+            Restore-SqlDatabase -ServerInstance $instance -Database $restoredb -BackupFile $backupfile -RelocateFile @($RelocateData,$RelocateLog) -ReplaceDatabase;
+        }
+        else
+        {
+            Write-Host "Function Restore-SqlDatabaseToAzure was stopped because of request from user." -ForegroundColor Magenta;
+            return;
+        }
     }
+}
