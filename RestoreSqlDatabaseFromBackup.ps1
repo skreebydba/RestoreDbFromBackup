@@ -6,14 +6,11 @@
   Takes backup file name, database name, server name, logical files names, and physical file names as input and restores the database
   killing all open connections to the destination database if it exists.
   .EXAMPLE
-  Restore-SqlDatabaseToAzure -sourcedb 'boomi' `
-  -restoredb 'boomi4' `
+  Restore-SqlDatabaseToAzure -restoredb 'boomi4' `
   -instance 'cncybook82\dev2017' `
   -backupfile 'c:\backup\boomi.bak' `
   -datapath 'c:\data\restoretest' `
   -logpath 'c:\log\restoretest'; 
-  .PARAMETER sourcedb
-  The database being restored.
   .PARAMETER restoredb
   The database name being restored.
   .PARAMETER instance
@@ -28,14 +25,6 @@
   [CmdletBinding(SupportsShouldProcess=$True,ConfirmImpact='Low')]
   param
   (
-    [Parameter(Mandatory=$True,
-    ValueFromPipeline=$True,
-    ValueFromPipelineByPropertyName=$True,
-    HelpMessage='What database is being restored?')]
-    [Alias('source')]
-    [ValidateLength(3,255)]
-    [string]$sourcedb,
-
     [Parameter(Mandatory=$True,
     ValueFromPipeline=$True,
     ValueFromPipelineByPropertyName=$True,
@@ -85,7 +74,7 @@
     cls;
 
     <# Prompt user that all connections will be killed in the source database. Stop function if answer is not Y. #>
-    Write-Host "Executing this function will kill all connections to database $sourcedb on instance $instance.  Enter " -NoNewline
+    Write-Host "Executing this function will kill all connections to database $restoredb on instance $instance.  Enter " -NoNewline
     Write-Host "Y " -ForegroundColor Red -NoNewline
     Write-Host "to continue: " -NoNewline
     $continue = Read-Host;
@@ -98,11 +87,62 @@
 
     <# Build the physical file paths and names for the restore database #>
     $physdata = "$datapath\$restoredb.mdf";
-    $physlog = "$logpath\$restoredb`_log.ldf"
+    $physlog = "$logpath\$restoredb`_log.ldf";
 
-    <# Build the move parameters for the restored database #>
-    $RelocateData = New-Object Microsoft.SqlServer.Management.Smo.RelocateFile("$sourcedb", $physdata)
-    $RelocateLog = New-Object Microsoft.SqlServer.Management.Smo.RelocateFile("$sourcedb`_Log", $physlog)
+    <# Initialize variables to build relocate file parameter #>
+    $relocate = @();
+    $count = 0;
+
+    <# Confirm that the backup file exists.  If it doesn not, raise an error. #>
+    $backupexists = Test-Path $backupfile -ErrorAction SilentlyContinue;
+
+    if($backupexists -ne $True)
+    {
+        throw "Backup file $backupfile does not exist.  Please check the file path and name and retry.";
+    }
+
+    <# Build the RESTORE FILELISTONLY statement and execute it to return a list of logical and physical file names #>
+    $filelistonly = "RESTORE FILELISTONLY FROM DISK = '$backupfile'";
+    $filelist = Invoke-Sqlcmd -ServerInstance $instance -Database master -Query $filelistonly;
+
+    <# Build the RelocateFile parameter #>
+    foreach ($file in $filelist) {
+
+    $relocateDataFile = new-object('Microsoft.SqlServer.Management.Smo.RelocateFile')
+
+    $relocateDataFile.LogicalFileName = $file.LogicalName
+
+    if ($file.Type -eq 'D') {
+                
+            <# If there is more than one data file, append the file count to the end of the physical file name
+                to prevent contention #>
+            if($count -ge 1)
+            {
+                $relocateDataFile.PhysicalFileName = "$datapath\$restoredb`_$count.mdf";  
+            }
+            else
+            {
+                $relocateDataFile.PhysicalFileName = "$datapath\$restoredb.mdf"
+            }
+
+            $count += 1;
+
+        }
+
+    elseif($file.Type -eq 'S') 
+        {
+            $relocateDataFile.PhysicalFileName = "$datapath\$restoredb`_mod"
+        }
+
+    else {
+
+        $relocateDataFile.PhysicalFileName = "$logpath\$restoredb.ldf"
+
+        }
+
+    $relocate += $relocateDataFile;
+
+    }
 
     <# Check if the restore database exists.  If it does, kill all existing connections. #>
     $exists = Invoke-Sqlcmd -ServerInstance $instance -Database master -Query "SELECT 1 FROM sys.databases WHERE name = '$restoredb';";
@@ -113,19 +153,12 @@
 
         <# Prompt the user that the restore database will be overwritten.  Stop function if the answer is not yes. #>
 
-        Write-Host "If database $sourcedb exists on instance $instance, it will be overwitten.  Enter " -NoNewline
+        Write-Host "If database $restoredb exists on instance $instance, it will be overwitten.  Enter " -NoNewline
         Write-Host "Y " -ForegroundColor Red -NoNewline
         Write-Host "to continue: " -NoNewline
         $overwrite = Read-Host;
 
-        <# Confirm that the backup file, data path, and log path exist.  If any of them do not, raise an error. #>
-        $backupexists = Test-Path $backupfile -ErrorAction SilentlyContinue;
-
-        if($backupexists -ne $True)
-        {
-            throw "Backup file $backupfile does not exist.  Please check the file path and name and retry.";
-        }
-
+        <# Confirm that the data path and log path exist.  If either of them do not, raise an error. #>
         $dataexists = Test-Path $datapath -ErrorAction SilentlyContinue;
         if($dataexists -ne $True)
         {
@@ -141,7 +174,7 @@
         <# If all checks have passed and the user has opted to overwrite the restore database, restore the database. #>
         if($overwrite -eq 'Y')
         {
-            Restore-SqlDatabase -ServerInstance $instance -Database $restoredb -BackupFile $backupfile -RelocateFile @($RelocateData,$RelocateLog) -ReplaceDatabase;
+            Restore-SqlDatabase -ServerInstance $instance -Database $restoredb -BackupFile $backupfile -RelocateFile $relocate -ReplaceDatabase;
         }
         else
         {
